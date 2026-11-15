@@ -1,1 +1,10 @@
+# Python
 __pycache__/
+*.pyc
+
+# Dataset MNIST: lo scarica addestra.py
+dati/
+
+# File temporanei
+_anteprime/
+*.bin
