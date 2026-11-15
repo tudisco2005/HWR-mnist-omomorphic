@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cifre su dati cifrati</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="ispettore.css">
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="occhiello">Crittografia omomorfica</div>
+    <h1>Riconoscere cifre senza guardarle</h1>
+    <p>Una rete neurale eseguita su un'immagine cifrata: il server calcola, ma non vede nulla.</p>
+  </div>
+  <div class="tag">CKKS · TenSEAL · 128 bit</div>
+</header>
+
+<ol class="stepper" id="stepper">
+  <li data-fase="disegna"><b>1</b>Disegna</li>
+  <li data-fase="cifra"><b>2</b>Cifra</li>
+  <li data-fase="invia"><b>3</b>Invia</li>
+  <li data-fase="calcola"><b>4</b>Calcolo cifrato</li>
+  <li data-fase="restituisce"><b>5</b>Restituisce</li>
+  <li data-fase="decifra"><b>6</b>Decifra</li>
+</ol>
+
+<main>
+  <!-- CLIENT -->
+  <section class="pannello client">
+    <h2>Client <small>ha la chiave segreta</small></h2>
+
+    <div class="riga">
+      <div class="blocco">
+        <canvas id="tela" width="280" height="280" aria-label="area di disegno"></canvas>
+        <div class="pulsanti">
+          <button id="riconosci" class="primario">Riconosci</button>
+          <button id="esempio">Esempio</button>
+          <button id="cancella">Cancella</button>
+          <button id="ispeziona" class="ispeziona" disabled>Ispeziona</button>
+        </div>
+      </div>
+      <figure class="vista">
+        <canvas id="anteprima" width="28" height="28" class="pixel"></canvas>
+        <figcaption>Il client vede<br><strong>l'immagine</strong></figcaption>
+      </figure>
+    </div>
+
+    <div class="esito" id="esito">
+      <div class="cifra"><span id="v-pred" class="vuoto">?</span><small>cifra riconosciuta</small></div>
+      <div class="barre" id="barre"></div>
+    </div>
+    <p class="verifica" id="v-verifica">&nbsp;</p>
+  </section>
+
+  <!-- RETE -->
+  <section class="rete" aria-label="cosa viaggia in rete">
+    <div class="pacchetto andata" id="p-ct">
+      <span class="freccia">→</span>
+      <b>immagine cifrata</b>
+      <em id="v-ct">–</em>
+    </div>
+    <div class="pacchetto ritorno" id="p-ris">
+      <span class="freccia">←</span>
+      <b>punteggi cifrati</b>
+      <em id="v-ris">–</em>
+    </div>
+    <div class="verifica-rete" id="v-rete"></div>
+  </section>
+
+  <!-- SERVER -->
+  <section class="pannello server">
+    <h2>Server <small>ha il modello, non la chiave</small></h2>
+
+    <div class="riga">
+      <figure class="vista">
+        <canvas id="rumore" width="28" height="28" class="pixel"></canvas>
+        <figcaption>Il server vede<br><strong>solo rumore</strong></figcaption>
+      </figure>
+      <ol class="pipeline" id="pipeline">
+        <li><b>conv</b><span>7×7 · 4 canali</span><i></i></li>
+        <li><b>x²</b><span>attivazione</span><i></i></li>
+        <li><b>fc1</b><span>256 → 64</span><i></i></li>
+        <li><b>x²</b><span>attivazione</span><i></i></li>
+        <li><b>fc2</b><span>64 → 10</span><i></i></li>
+      </ol>
+    </div>
+
+    <p class="nota">Solo somme e moltiplicazioni: per questo x² al posto della ReLU.</p>
+
+    <div class="esito">
+      <div class="cifra ignota"><span>?</span><small>il server non sa quale cifra</small></div>
+      <div class="cifrati">
+        <canvas id="ris-rumore" width="10" height="6" class="pixel"></canvas>
+        <div class="etichette"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div>
+      </div>
+    </div>
+    <p class="verifica">I 10 punteggi restituiti, così come li vede il server</p>
+  </section>
+</main>
+
+<div id="stato" role="status"></div>
+
+<footer>
+  <span>Training in chiaro (PyTorch, 97,8% sul test set) · inferenza cifrata (TenSEAL, N = 16384)</span>
+  <span>Tasti: <kbd>Invio</kbd> riconosci · <kbd>E</kbd> esempio · <kbd>I</kbd> ispeziona · <kbd>Canc</kbd> cancella · clic su ogni elemento per i dettagli</span>
+</footer>
+
+<!-- ISPETTORE: una pagina per ogni fase -->
+<div id="ispettore" hidden>
+  <div class="barra-i">
+    <b>Ispettore</b>
+    <span class="titolo-i"></span>
+    <span class="pos-i"></span>
+    <span class="spazio"></span>
+    <button class="prec" title="fase precedente (←)">←</button>
+    <button class="succ" title="fase successiva (→)">→</button>
+    <button class="chiudi" title="chiudi (Esc)">Chiudi</button>
+  </div>
+  <nav></nav>
+  <div class="corpo-i"></div>
+</div>
+
+<script src="app.js"></script>
+<script src="ispettore.js"></script>
+</body>
+</html>
