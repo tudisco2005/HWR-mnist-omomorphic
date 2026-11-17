@@ -16,18 +16,24 @@
   <div>
     <div class="occhiello">Crittografia omomorfica</div>
     <h1>Riconoscere cifre senza guardarle</h1>
-    <p>Una rete neurale eseguita su un'immagine cifrata: il server calcola, ma non vede nulla.</p>
+    <p data-chiaro="Modalità di confronto: la stessa rete, senza cifratura. Il server vede tutto.">Una rete neurale eseguita su un'immagine cifrata: il server calcola, ma non vede nulla.</p>
   </div>
-  <div class="tag">CKKS · TenSEAL · 128 bit</div>
+  <div class="destra">
+    <div class="modalita" role="radiogroup" aria-label="modalità di esecuzione">
+      <button role="radio" data-modo="cifrato" aria-checked="true" title="Inferenza sui dati cifrati (CKKS)">🔒 Cifrato</button>
+      <button role="radio" data-modo="chiaro" aria-checked="false" title="Stessa rete, ma l'immagine viaggia e viene elaborata in chiaro">In chiaro</button>
+    </div>
+    <div class="tag" data-chiaro="PyTorch · nessuna cifratura">CKKS · TenSEAL · 128 bit</div>
+  </div>
 </header>
 
 <ol class="stepper" id="stepper">
   <li data-fase="disegna"><b>1</b>Disegna</li>
-  <li data-fase="cifra"><b>2</b>Cifra</li>
+  <li data-fase="cifra"><b>2</b><span data-chiaro="Prepara">Cifra</span></li>
   <li data-fase="invia"><b>3</b>Invia</li>
-  <li data-fase="calcola"><b>4</b>Calcolo cifrato</li>
+  <li data-fase="calcola"><b>4</b><span data-chiaro="Calcolo in chiaro">Calcolo cifrato</span></li>
   <li data-fase="restituisce"><b>5</b>Restituisce</li>
-  <li data-fase="decifra"><b>6</b>Decifra</li>
+  <li data-fase="decifra"><b>6</b><span data-chiaro="Legge">Decifra</span></li>
 </ol>
 
 <main>
@@ -62,12 +68,12 @@
   <section class="rete" aria-label="cosa viaggia in rete">
     <div class="pacchetto andata" id="p-ct">
       <span class="freccia">→</span>
-      <b>immagine cifrata</b>
+      <b data-chiaro="immagine in chiaro">immagine cifrata</b>
       <em id="v-ct">–</em>
     </div>
     <div class="pacchetto ritorno" id="p-ris">
       <span class="freccia">←</span>
-      <b>punteggi cifrati</b>
+      <b data-chiaro="punteggi in chiaro">punteggi cifrati</b>
       <em id="v-ris">–</em>
     </div>
     <div class="verifica-rete" id="v-rete"></div>
@@ -75,12 +81,12 @@
 
   <!-- SERVER -->
   <section class="pannello server">
-    <h2>Server <small>ha il modello, non la chiave</small></h2>
+    <h2>Server <small data-chiaro="ha il modello e vede i dati">ha il modello, non la chiave</small></h2>
 
     <div class="riga">
       <figure class="vista">
         <canvas id="rumore" width="28" height="28" class="pixel"></canvas>
-        <figcaption>Il server vede<br><strong>solo rumore</strong></figcaption>
+        <figcaption>Il server vede<br><strong data-chiaro="l'immagine">solo rumore</strong></figcaption>
       </figure>
       <ol class="pipeline" id="pipeline">
         <li><b>conv</b><span>7×7 · 4 canali</span><i></i></li>
@@ -94,13 +100,13 @@
     <p class="nota">Solo somme e moltiplicazioni: per questo x² al posto della ReLU.</p>
 
     <div class="esito">
-      <div class="cifra ignota"><span>?</span><small>il server non sa quale cifra</small></div>
+      <div class="cifra ignota" id="s-cifra"><span id="s-pred">?</span><small data-chiaro="il server sa quale cifra">il server non sa quale cifra</small></div>
       <div class="cifrati">
         <canvas id="ris-rumore" width="10" height="6" class="pixel"></canvas>
         <div class="etichette"><span>0</span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span></div>
       </div>
     </div>
-    <p class="verifica">I 10 punteggi restituiti, così come li vede il server</p>
+    <p class="verifica" data-chiaro="I 10 punteggi restituiti, leggibili anche dal server">I 10 punteggi restituiti, così come li vede il server</p>
   </section>
 </main>
 

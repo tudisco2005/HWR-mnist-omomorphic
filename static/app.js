@@ -43,6 +43,26 @@ tela.addEventListener("pointermove", (e) => {
 });
 ["pointerup", "pointercancel"].forEach((ev) => tela.addEventListener(ev, () => (disegnando = false)));
 
+// ───────────── modalità: cifrato / in chiaro ─────────────
+let modo = "cifrato";
+// Ogni elemento con data-chiaro ha un testo alternativo per la modalità in chiaro.
+document.querySelectorAll("[data-chiaro]").forEach((el) => (el.dataset.cifrato = el.textContent));
+
+function impostaModo(nuovo) {
+  if (occupato || (nuovo !== "cifrato" && nuovo !== "chiaro")) return;
+  modo = nuovo;
+  try { localStorage.setItem("modalita", modo); } catch {}
+  document.body.classList.toggle("modo-chiaro", modo === "chiaro");
+  document.querySelectorAll(".modalita button").forEach((b) => b.setAttribute("aria-checked", b.dataset.modo === modo));
+  document.querySelectorAll("[data-chiaro]").forEach((el) => (el.textContent = el.dataset[modo]));
+  // il risultato precedente appartiene all'altra modalità: si riparte da capo
+  window.ultimo = null;
+  $("ispeziona").disabled = true;
+  document.body.classList.remove("ispezionabile");
+  azzera();
+}
+document.querySelectorAll(".modalita button").forEach((b) => (b.onclick = () => impostaModo(b.dataset.modo)));
+
 // ───────────── stato dell'interfaccia ─────────────
 const FASI = ["disegna", "cifra", "invia", "calcola", "restituisce", "decifra"];
 
@@ -93,6 +113,8 @@ function azzera() {
   });
   $("v-pred").textContent = "?";
   $("v-pred").classList.add("vuoto");
+  $("s-pred").textContent = "?";
+  $("s-cifra").classList.add("ignota");
   $("v-verifica").innerHTML = "&nbsp;";
   barre();
 }
@@ -139,15 +161,16 @@ async function riconosci() {
   if (occupato) return;
   if (vuota) return stato("Disegna prima una cifra", 2000);
   occupato = true;
-  document.querySelectorAll("main button").forEach((b) => (b.disabled = true));
+  document.querySelectorAll("main button, .modalita button").forEach((b) => (b.disabled = true));
   azzera();
+  const chiaro = modo === "chiaro";
   const voci = [...document.querySelectorAll("#pipeline li")];
 
   try {
     const r = await fetch("/api/riconosci", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ immagine: (window.ultimoDisegno = tela.toDataURL("image/png")) }),
+      body: JSON.stringify({ immagine: (window.ultimoDisegno = tela.toDataURL("image/png")), modalita: modo }),
     });
     if (!r.ok) throw new Error(r.statusText);
 
@@ -156,20 +179,20 @@ async function riconosci() {
       switch (ev.evento) {
         case "cifra": // il client prepara l'immagine e la cifra
           fase("cifra", true);
-          stato("Il client prepara e cifra l'immagine…");
+          stato(chiaro ? "Il client prepara l'immagine (nessuna cifratura)…" : "Il client prepara e cifra l'immagine…");
           break;
         case "cifrato":
           pixel($("anteprima"), ev.pixel);
           break;
         case "invia": // il ciphertext parte verso il server
           fase("invia", true);
-          stato("Invio dell'immagine cifrata al server…");
+          stato(chiaro ? "Invio dell'immagine in chiaro al server…" : "Invio dell'immagine cifrata al server…");
           $("v-ct").textContent = dim(ev.byte);
           $("p-ct").classList.add("visto");
           break;
         case "calcola": // il server ha ricevuto tutto il corpo e inizia a calcolare
           fase("calcola", true);
-          stato("Il server calcola sul ciphertext…");
+          stato(chiaro ? "Il server calcola sull'immagine in chiaro…" : "Il server calcola sul ciphertext…");
           pixel($("rumore"), ultimoRumore);
           voci[0].classList.add("lavora");
           break;
@@ -180,14 +203,14 @@ async function riconosci() {
           break;
         case "restituisce": // i punteggi cifrati tornano al client
           fase("restituisce", true);
-          stato("I punteggi cifrati tornano al client…");
+          stato(chiaro ? "I punteggi tornano al client…" : "I punteggi cifrati tornano al client…");
           $("v-ris").textContent = dim(ev.byte);
           $("p-ris").classList.add("visto");
           pixel($("ris-rumore"), ev.rumore);
           break;
         case "decifra": // il client decifra con la chiave segreta
           fase("decifra", true);
-          stato("Il client decifra i punteggi…");
+          stato(chiaro ? "Il client legge i punteggi…" : "Il client decifra i punteggi…");
           break;
         case "risultato":
           d = ev.dati;
@@ -211,7 +234,7 @@ async function riconosci() {
     stato("Errore: " + err.message, 4000);
   } finally {
     occupato = false;
-    document.querySelectorAll("main button").forEach((b) => (b.disabled = false));
+    document.querySelectorAll("main button, .modalita button").forEach((b) => (b.disabled = false));
     $("ispeziona").disabled = !window.ultimo;
   }
 }
@@ -223,6 +246,14 @@ function mostraRisultato(d) {
   $("v-pred").textContent = d.client.predizione;
   $("v-pred").classList.remove("vuoto");
   const v = d.verifica;
+  if (d.modalita === "chiaro") {
+    $("s-pred").textContent = d.client.predizione; // in chiaro anche il server conosce la risposta
+    $("s-cifra").classList.remove("ignota");
+    $("v-verifica").textContent =
+      `Inferenza in chiaro · calcolo sul server ${tempo(d.server.ms_totale)}` +
+      ` · andata e ritorno ${tempo(d.canale.ms_rete)}`;
+    return;
+  }
   $("v-verifica").textContent =
     `Modello in chiaro: ${v.predizione_chiaro}` +
     (v.predizione_chiaro === d.client.predizione ? " (stessa cifra)" : " (cifra diversa)") +
@@ -239,7 +270,9 @@ async function verificaPacchetti(d) {
     el.className = "verifica-rete " + (v.ok ? "ok" : "ko");
     el.textContent = v.ok
       ? `✓ immagine assente nei ${v.rete.length} pacchetti trasmessi`
-      : "! verifica dei pacchetti non superata";
+      : v.trovatoIn.length
+        ? `! immagine trovata in ${v.trovatoIn.length} pacchetti su ${v.rete.length}`
+        : "! verifica dei pacchetti non superata";
   } catch {
     el.textContent = "";
   }
@@ -287,4 +320,6 @@ document.addEventListener("keydown", (e) => {
 });
 
 pulisciTela();
-azzera();
+let salvato = null;
+try { salvato = localStorage.getItem("modalita"); } catch {}
+impostaModo(salvato || "cifrato");

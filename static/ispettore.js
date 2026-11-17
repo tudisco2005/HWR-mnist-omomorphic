@@ -1,21 +1,27 @@
 // Ispettore: una pagina di dettaglio per ogni fase del processo.
 // Usa i dati dell'ultimo riconoscimento (window.ultimo) e i pesi del modello (/api/modello).
 
-const FASI_ISP = [
-  { id: "prep", gruppo: "client", titolo: "Preprocessing" },
-  { id: "norm", gruppo: "client", titolo: "Normalizzazione" },
+const TUTTE_LE_FASI = [
+  { id: "prep", gruppo: "client", sotto: "preprocessing", titolo: "Preprocessing" },
+  { id: "norm", gruppo: "client", sotto: "preprocessing", titolo: "Normalizzazione" },
+  { id: "im2col", gruppo: "client", sotto: "preprocessing", titolo: "Codifica im2col" },
   { id: "chiavi", gruppo: "client", titolo: "Chiavi e parametri CKKS" },
-  { id: "im2col", gruppo: "client", titolo: "Codifica im2col" },
   { id: "cifra", gruppo: "client", titolo: "Cifratura" },
   { id: "rete", gruppo: "rete", titolo: "Cosa viaggia in rete" },
-  { id: "conv", gruppo: "server", titolo: "conv", passo: 1 },
-  { id: "q1", gruppo: "server", titolo: "x² (prima)", passo: 2 },
+  { id: "conv", gruppo: "server", sotto: "convoluzione", titolo: "conv", passo: 1 },
+  { id: "q1", gruppo: "server", sotto: "convoluzione", titolo: "x² (prima)", passo: 2 },
   { id: "fc1", gruppo: "server", titolo: "fc1", passo: 3 },
   { id: "q2", gruppo: "server", titolo: "x² (seconda)", passo: 4 },
   { id: "fc2", gruppo: "server", titolo: "fc2", passo: 5 },
   { id: "livelli", gruppo: "server", titolo: "Livelli consumati" },
   { id: "dec", gruppo: "ritorno", titolo: "Decifratura" },
 ];
+// In chiaro non ci sono chiavi, cifratura né livelli: restano le altre pagine.
+const FASI_IN_CHIARO = ["prep", "norm", "rete", "conv", "q1", "fc1", "q2", "fc2", "dec"];
+const inChiaro = () => window.ultimo?.modalita === "chiaro";
+let FASI_ISP = TUTTE_LE_FASI;
+// Sottogruppi richiudibili della barra laterale
+const SOTTOGRUPPI = { preprocessing: "Preparazione immagine", convoluzione: "Convoluzione" };
 const GRUPPI = {
   client: "Client · prima dell'invio",
   rete: "Rete",
@@ -23,7 +29,14 @@ const GRUPPI = {
   ritorno: "Client · al ritorno",
 };
 
-const ISP = { indice: 0, modello: null };
+// titoli e gruppi che cambiano in modalità in chiaro
+const TITOLI_CHIARO = { dec: "Lettura dei punteggi" };
+const GRUPPI_CHIARO = { server: "Server · sui dati in chiaro" };
+const titolo = (f) => (inChiaro() && TITOLI_CHIARO[f.id]) || f.titolo;
+const nomeGruppo = (g) => (inChiaro() && GRUPPI_CHIARO[g]) || GRUPPI[g];
+
+const ISP = { indice: 0, modello: null, chiusi: new Set() };
+try { ISP.chiusi = new Set(JSON.parse(localStorage.getItem("ispettore-chiusi") || "[]")); } catch {}
 
 // ───────────────────────── utilità ─────────────────────────
 
@@ -576,7 +589,9 @@ const PAGINE = {
       h(
         "div",
         {},
-        h("h3", {}, stato.ok ? "L'immagine non ha mai lasciato il client" : "Attenzione: controllo non superato"),
+        h("h3", {}, stato.ok ? "L'immagine non ha mai lasciato il client"
+          : d.modalita === "chiaro" ? "Modalità in chiaro: l'immagine ha lasciato il client"
+          : "Attenzione: controllo non superato"),
         h(
           "ul",
           {},
@@ -659,7 +674,7 @@ const PAGINE = {
         legendaDiv(M.fc1_w.flat()),
         h("div", { class: "etichetta-catena" }, "b₁ (64 valori)"),
         vettore(M.fc1_b, { altezza: 60, testo: (i, v) => `b₁[${i}] = ${num(v)}` }),
-        p("Il server aggiunge 64 righe uguali a b₁/64 in fondo alla matrice: moltiplicate per il blocco di slot costanti a 1, sommano esattamente b₁.")
+        inChiaro() ? null : p("Il server aggiunge 64 righe uguali a b₁/64 in fondo alla matrice: moltiplicate per il blocco di slot costanti a 1, sommano esattamente b₁.")
       );
     } else if (fase.id === "fc2") {
       pesi = scheda(
@@ -674,7 +689,9 @@ const PAGINE = {
       pesi = scheda(
         "server",
         "Nessun peso",
-        p("Il ciphertext viene moltiplicato per sé stesso. Il prodotto ha 3 polinomi: la chiave di rilinearizzazione lo riporta a 2, poi il rescale divide per un primo da 40 bit e riporta la scala a 2^40.")
+        p(inChiaro()
+          ? "Ogni valore viene moltiplicato per sé stesso: un'operazione elementare, senza alcun costo aggiuntivo."
+          : "Il ciphertext viene moltiplicato per sé stesso. Il prodotto ha 3 polinomi: la chiave di rilinearizzazione lo riporta a 2, poi il rescale divide per un primo da 40 bit e riporta la scala a 2^40.")
       );
     }
 
@@ -687,9 +704,11 @@ const PAGINE = {
           )
         ),
         legendaDiv(dec.slice(0, 256)),
+      ];
+      if (dec.length > 256) contenuto.push( // solo in CKKS: il blocco costante per il bias di fc1
         h("div", { class: "etichetta-catena" }, `slot 256–319: blocco costante (valori ${num(minimo(dec.slice(256)), 4)} – ${num(massimo(dec.slice(256)), 4)})`),
         mappa(dec.slice(256), 1, 64, { scala: "grigio", min: 0, max: 1, cella: 6, etichetta: (r, c, v) => `slot ${256 + c} = ${num(v, 6)}` }),
-      ];
+      );
     } else if (fase.id === "fc2") {
       const best = dec.indexOf(massimo(dec));
       contenuto = [vettore(dec, { etichette: [..."0123456789"], evidenzia: best, testo: (i, v) => `cifra ${i}: ${num(v, 4)}` })];
@@ -697,9 +716,40 @@ const PAGINE = {
       contenuto = [vettore(dec, { testo: (i, v) => `neurone ${i} = ${num(v)}` })];
     }
 
+    if (inChiaro()) {
+      return [
+        p(info.chiaro),
+        ...introStrato(fase, dec, d),
+        h(
+          "div",
+          { class: "riepilogo" },
+          h("div", {}, h("span", {}, "operazione"), h("b", { class: "formula" }, info.formula)),
+          h("div", {}, h("span", {}, "forma"), h("b", {}, info.forma_chiaro)),
+          h("div", {}, h("span", {}, "tempo"), h("b", {}, ms(passo.millisecondi))),
+          h("div", {}, h("span", {}, "dati"), h("b", {}, "in chiaro"))
+        ),
+        griglia(
+          scheda(
+            "server",
+            "Il server vede: i valori stessi",
+            p("Senza cifratura, l'uscita dello strato è leggibile dal server così com'è. Sono i valori che ha restituito al client."),
+            ...contenuto
+          ),
+          pesi,
+          scheda(
+            "neutro",
+            "Confronto con PyTorch sul client",
+            dispersione(chiaro, dec.slice(0, chiaro.length)),
+            p(`Scarto massimo: <b>${num(passo.scarto, 6)}</b> su ${chiaro.length} valori. Stesso modello e stessi numeri: lo scarto è nullo, a parte l'arrotondamento a 6 cifre nella risposta del server. In modalità cifrata qui compare l'errore di CKKS.`)
+          )
+        ),
+      ];
+    }
+
     const livelloUsato = prec.livello - passo.livello;
     return [
       p(info.come),
+      ...introStrato(fase, dec, d),
       h(
         "div",
         { class: "riepilogo" },
@@ -756,66 +806,220 @@ const PAGINE = {
   },
 
   dec(d) {
-    const pr = d.client.probabilita;
+    const ch = d.modalita === "chiaro";
     const raw = d.client.punteggi_grezzi;
-    const chiaro = d.verifica.punteggi_chiaro;
     const best = d.client.predizione;
-    return [
-      p(`Il client decifra con la chiave segreta i 10 punteggi (${ms(d.client.ms_decifratura)}). La softmax e la scelta della cifra avvengono in chiaro, sul client: il server non le vede.`),
-      griglia(
-        scheda(
-          "client",
-          "Punteggi decifrati",
-          vettore(raw, { etichette: [..."0123456789"], evidenzia: best, altezza: 170, testo: (i, v) => `cifra ${i}: punteggio ${num(v, 4)}, probabilità ${num(pr[i] * 100, 2)}%` }),
-          p(`La cifra scelta è quella con il punteggio più alto: <b>${best}</b>. Le probabilità si ottengono con la softmax; con punteggi così distanziati quella della cifra scelta è quasi il 100%.`),
-          h("div", { class: "formula" }, "p(i) = e^(s_i) / Σ e^(s_j)")
-        ),
-        scheda(
-          "client",
-          "I numeri decifrati",
-          tabella(
-            raw.map((v, i) => [
-              h(i === best ? "b" : "span", {}, String(i)),
-              num(v, 6),
-              num(chiaro[i], 4),
-              num(v - chiaro[i], 6),
-              num(pr[i] * 100, 2) + "%",
-            ]),
-            ["cifra", "decifrato", "PyTorch", "differenza", "probabilità"]
-          )
-        )
+    const chiaro = d.verifica.punteggi_chiaro;
+    const ultimo = d.server.passi[d.server.passi.length - 1];
+    const cifre = [..."0123456789"];
+
+    // softmax calcolata qui, mostrando ogni passaggio intermedio
+    const sMax = massimo(raw);
+    const esp = raw.map((v) => Math.exp(v - sMax));
+    const somma = esp.reduce((a, b) => a + b, 0);
+    const prob = esp.map((e) => e / somma);
+    const ordine = [...prob.keys()].sort((a, b) => prob[b] - prob[a]);
+    const secondo = ordine[1];
+
+    const passi = [];
+    if (ch) {
+      passi.push([
+        "Riceve i punteggi, già leggibili",
+        p(`Dal server arriva una risposta JSON di <b>${mb(d.canale.byte_risposta)}</b> con 10 numeri in chiaro. Non c'è nulla da decifrare: per questo anche il server, e chiunque osservi la rete, sa già quale cifra hai disegnato.`),
+      ]);
+      passi.push([
+        "Legge i 10 punteggi",
+        p("Ogni numero è il punteggio (logit) di una cifra: più è alto, più la rete è convinta. Non sono ancora probabilità: possono essere negativi e non sommano a 1."),
+        vettore(raw, { etichette: cifre, evidenzia: best, altezza: 120, testo: (i, v) => `cifra ${i}: punteggio ${num(v, 4)}` }),
+      ]);
+    } else {
+      const P = d.sessione.parametri;
+      passi.push([
+        "Riceve il ciphertext dei punteggi",
+        p(`Dal server arrivano <b>${mb(d.canale.byte_risultato)}</b>: un vettore CKKS di ${ultimo.polinomi} polinomi, al livello ${ultimo.livello} su 7 (scala 2^${num(ultimo.scala_bit, 0)}). Senza la chiave segreta questi byte sono indistinguibili da rumore casuale: è ciò che ha visto il server.`),
+        mappa(ultimo.rumore, 64, 64, { scala: "grigio", min: 0, max: 255, cella: 2, etichetta: (r, c, v) => `byte 0x${v.toString(16).padStart(2, "0")}` }),
+      ]);
+      passi.push([
+        "Decifra con la chiave segreta",
+        p(`Il ciphertext è una coppia di polinomi (c₀, c₁). Il client li combina con la chiave segreta <b>s</b>, che non ha mai lasciato questo processo. Il risultato è un polinomio in chiaro: contiene i punteggi moltiplicati per la scala, più un piccolo errore introdotto da CKKS. Tempo: <b>${ms(d.client.ms_decifratura)}</b>.`),
+        h("div", { class: "formula" }, "m(X) = c₀(X) + c₁(X) · s(X)   mod q"),
+      ]);
+      passi.push([
+        "Decodifica: dal polinomio ai numeri",
+        p(`Il polinomio viene diviso per la scala 2^${P.scala_bit} e trasformato (FFT inversa) nei ${num(P.slot)} slot del vettore. Solo i primi 10 slot hanno un significato: sono i punteggi (logit) delle cifre 0–9. Non sono ancora probabilità: possono essere negativi e non sommano a 1.`),
+        vettore(raw, { etichette: cifre, evidenzia: best, altezza: 120, testo: (i, v) => `slot ${i} → cifra ${i}: ${num(v, 6)}` }),
+      ]);
+    }
+    passi.push([
+      "Softmax: dai punteggi alle probabilità",
+      p(`Ogni punteggio diventa positivo con l'esponenziale, poi si divide per la somma, così i 10 valori sommano a 1. Si sottrae prima il massimo (${num(sMax, 3)}) per evitare numeri enormi: il risultato non cambia. L'esponenziale amplifica le differenze, quindi pochi punti di vantaggio bastano per una probabilità vicina al 100%.`),
+      h("div", { class: "formula" }, "p(i) = e^(s_i − max) / Σ_j e^(s_j − max)"),
+      tabella(
+        raw.map((v, i) => {
+          const b = (t) => h(i === best ? "b" : "span", {}, t);
+          return [b(String(i)), b(num(v, 3)), b(num(v - sMax, 3)), b(num(esp[i], 6)), h("span", { class: "barretta" }, h("i", { style: `width:${prob[i] * 100}%` }), h("span", {}, num(prob[i] * 100, 2) + "%"))];
+        }).concat([[h("b", {}, "Σ"), "", "", h("b", {}, num(somma, 6)), h("b", {}, "100%")]]),
+        ["cifra", "s_i", "s_i − max", "e^(s_i − max)", "p(i)"]
       ),
+    ]);
+    passi.push([
+      "Sceglie la cifra",
+      p(`La risposta è la cifra con probabilità più alta (argmax): <b>${best}</b>, con il ${num(prob[best] * 100, 2)}%. La seconda è il ${secondo} con il ${num(prob[secondo] * 100, 2)}%: un distacco di ${num(raw[best] - raw[secondo], 2)} punti di punteggio.` +
+        (ch ? "" : " Softmax e argmax avvengono sul client, in chiaro: il server non le vede.")),
+    ]);
+    passi.push([
+      ch ? "Controllo con PyTorch sul client" : "Controllo: CKKS ha sbagliato?",
+      p(ch
+        ? "Il client ricalcola la stessa rete con PyTorch: i punteggi coincidono. Le differenze, dell'ordine di 10⁻⁶, vengono solo dall'arrotondamento a 6 decimali dei numeri trasmessi."
+        : `CKKS è uno schema approssimato: ogni operazione aggiunge un piccolo errore. Confrontando con la stessa rete in PyTorch, l'errore massimo è <b>${num(d.verifica.errore_max, 6)}</b>, troppo piccolo per cambiare la cifra scelta${d.verifica.predizione_chiaro === best ? " (PyTorch sceglie lo stesso " + best + ")" : ""}.`),
+      tabella(
+        raw.map((v, i) => [h(i === best ? "b" : "span", {}, String(i)), num(v, 6), num(chiaro[i], 4), num(v - chiaro[i], 6)]),
+        ["cifra", ch ? "ricevuto" : "decifrato", "PyTorch", "differenza"]
+      ),
+    ]);
+
+    return [
+      p(ch
+        ? "Il client riceve i 10 punteggi già in chiaro e li trasforma nella risposta finale. Ecco i passaggi, con i numeri di questa cifra."
+        : "Il client riceve i punteggi ancora cifrati e li trasforma nella risposta finale. Ecco i passaggi, con i numeri di questa cifra."),
+      h("ol", { class: "processo" }, passi.map(([titolo, ...corpo], i) =>
+        h("li", {}, h("div", { class: "num-p" }, String(i + 1)), h("div", { class: "corpo-p" }, h("h4", {}, titolo), ...corpo))
+      )),
     ];
   },
 };
 
 const STRATI = {
   conv: {
+    scopo: "Cerca forme locali nell'immagine. Ogni kernel 7×7 è un piccolo rilevatore che si accende davanti a un certo tipo di tratto (un bordo, una linea obliqua, una curva). Facendolo scorrere sull'immagine con passo 3 si ottiene una mappa 8×8 che dice <b>dove</b> quel tratto compare. Con 4 kernel si passa da 784 pixel a 4 mappe di \"presenza di tratti\": meno numeri, ma più significativi.",
+    riceve: "l'immagine 28×28 normalizzata",
+    produce: "4 mappe 8×8 (256 valori)",
+    senza: "la rete dovrebbe imparare ogni pixel separatamente, senza sfruttare la vicinanza tra pixel",
     formula: "y[c] = Σ w[c] · finestra + b[c]",
     forma: "4096 slot → 4 × 64 = 256 valori (+64 costanti)",
+    forma_chiaro: "28 × 28 → 4 × 8 × 8 = 256 valori",
+    chiaro: "PyTorch applica i 4 kernel 7×7 con passo 3 direttamente all'immagine 28×28: ogni canale produce una mappa 8×8. Nessuna codifica im2col, nessuna rotazione.",
     come: "Per ogni canale il server moltiplica gli slot per il kernel 7×7 (in chiaro) e somma le 49 righe con rotazioni: ogni colonna diventa un valore della mappa 8×8. Poi impacchetta i 4 canali e il blocco costante in un solo ciphertext.",
   },
   q1: {
+    scopo: "Introduce la <b>non linearità</b>. Convoluzione e strati densi sono solo somme pesate: messi in fila, senza nulla in mezzo, equivarrebbero a un'unica moltiplicazione per matrice, capace di separare le cifre solo con \"tagli dritti\". Il quadrato piega lo spazio: amplifica le risposte forti, schiaccia quelle vicine a zero e rende la rete capace di combinazioni più ricche. Si usa x² perché la ReLU non si può calcolare in modo cifrato.",
+    riceve: "le 256 risposte della convoluzione",
+    produce: "256 valori, tutti ≥ 0",
+    senza: "conv e fc1 collasserebbero in un unico strato lineare",
     formula: "y = x · x",
     forma: "320 → 320 valori",
+    forma_chiaro: "256 → 256 valori",
+    chiaro: "L'attivazione quadratica, la stessa del calcolo cifrato: in chiaro si potrebbe usare la ReLU, ma la rete è stata addestrata con x².",
     come: "L'attivazione quadratica sostituisce la ReLU, che non è un polinomio e quindi non si può calcolare in CKKS. È una moltiplicazione tra ciphertext.",
   },
   fc1: {
+    scopo: "Combina i tratti trovati dalla convoluzione in <b>motivi</b> più astratti. Ogni neurone guarda tutte le 256 risposte, ciascuna con il suo peso, e si attiva per una certa combinazione: per esempio \"anello in alto + tratto verticale a destra\", tipico del 9. È qui che la rete passa da \"dove sono i tratti\" a \"che forma hanno insieme\".",
+    riceve: "256 risposte dei tratti (dopo x²)",
+    produce: "64 motivi",
+    senza: "ogni cifra andrebbe riconosciuta direttamente dai singoli tratti, senza combinarli",
     formula: "y = W₁ · x + b₁",
     forma: "256 (+64 costanti) → 64",
+    forma_chiaro: "256 → 64",
+    chiaro: "Un normale prodotto matrice-vettore W₁ · x, più il bias b₁ sommato direttamente.",
     come: "Prodotto matrice-vettore con il metodo diagonale (Halevi e Shoup): il server moltiplica il vettore cifrato per le diagonali della matrice in chiaro e somma le versioni ruotate.",
   },
   q2: {
+    scopo: "Seconda non linearità, sui 64 motivi: mette in risalto i motivi davvero presenti e attenua quelli appena accennati, prima del voto finale. Come la prima, è un quadrato perché CKKS sa fare solo somme e moltiplicazioni.",
+    riceve: "64 motivi",
+    produce: "64 valori, tutti ≥ 0",
+    senza: "fc1 e fc2 collasserebbero in un unico strato lineare",
     formula: "y = x · x",
     forma: "64 → 64 valori",
+    forma_chiaro: "64 → 64 valori",
+    chiaro: "Seconda attivazione quadratica, sui 64 valori di fc1.",
     come: "Seconda attivazione quadratica: stessa operazione della prima, su 64 valori.",
   },
   fc2: {
+    scopo: "Il <b>voto finale</b>. C'è un neurone per ogni cifra: ciascuno somma i 64 motivi con i propri pesi, che dicono quanto ogni motivo è a favore o contro quella cifra. Il punteggio più alto indica la cifra riconosciuta.",
+    riceve: "64 motivi (dopo x²)",
+    produce: "10 punteggi, uno per cifra",
+    senza: "nessuna risposta: i motivi non sarebbero tradotti in cifre",
     formula: "y = W₂ · x + b₂",
     forma: "64 → 10 punteggi",
+    forma_chiaro: "64 → 10 punteggi",
+    chiaro: "Ultimo prodotto matrice-vettore più il bias: i 10 punteggi, in chiaro, che il server restituisce al client.",
     come: "Ultimo prodotto matrice-vettore. Qui il bias si somma direttamente, perché non segue un altro prodotto matrice-vettore. Il risultato sono i 10 punteggi, ancora cifrati.",
   },
 };
+
+// ───────────────────────── strati: a cosa serve ogni passo ─────────────────────────
+
+const PERCORSO = [
+  { id: null, nome: "immagine", forma: "28×28" },
+  { id: "conv", nome: "conv", forma: "4 × 8×8" },
+  { id: "q1", nome: "x²", forma: "256" },
+  { id: "fc1", nome: "fc1", forma: "64" },
+  { id: "q2", nome: "x²", forma: "64" },
+  { id: "fc2", nome: "fc2", forma: "10" },
+  { id: null, nome: "punteggi", forma: "0 – 9" },
+];
+
+function percorso(id) {
+  const k = PERCORSO.findIndex((x) => x.id === id);
+  return h("div", { class: "percorso" }, PERCORSO.map((x, i) =>
+    h("div", { class: "tappa" + (i === k ? " qui" : i < k ? " fatta" : ""), title: x.id ? "vai allo strato " + x.nome : null,
+      onclick: x.id && i !== k ? () => mostra(FASI_ISP.findIndex((f) => f.id === x.id)) : null },
+      h("b", {}, x.nome), h("span", {}, x.forma))
+  ));
+}
+
+// quota della "energia" totale portata dal 10% dei valori più grandi
+function concentrazione(v) {
+  const q = v.map((x) => x * x).sort((a, b) => b - a);
+  const tot = q.reduce((a, b) => a + b, 0) || 1;
+  return q.slice(0, Math.max(1, Math.round(v.length / 10))).reduce((a, b) => a + b, 0) / tot;
+}
+
+// Un'osservazione sui numeri di questa cifra, per ogni strato.
+function osserva(id, dec, d) {
+  if (id === "conv") {
+    const medie = [0, 1, 2, 3].map((c) => dec.slice(c * 64, c * 64 + 64).reduce((a, v) => a + Math.abs(v), 0) / 64);
+    const c = medie.indexOf(massimo(medie));
+    return `Il canale <b>${c}</b> risponde più forte (media |y| = ${num(medie[c], 2)}, contro ${medie.filter((_, i) => i !== c).map((m) => num(m, 2)).join(", ")} degli altri): il tratto che cerca è il più presente nella tua cifra. Nelle mappe qui sotto, rosso e blu indicano dove il tratto compare (in un verso o nell'altro).`;
+  }
+  if (id === "q1" || id === "q2") {
+    const n = id === "q1" ? 256 : 64;
+    const prima = d.server.passi[id === "q1" ? 1 : 3].decifrato.slice(0, n);
+    const dopo = dec.slice(0, n);
+    const neg = prima.filter((v) => v < 0).length;
+    return `Prima del quadrato il 10% dei valori più grandi portava il <b>${num(concentrazione(prima) * 100, 0)}%</b> dell'energia totale; dopo ne porta il <b>${num(concentrazione(dopo) * 100, 0)}%</b>: le risposte forti dominano, quelle deboli quasi spariscono. Inoltre ${neg} valori negativi su ${n} sono diventati positivi: conta quanto un tratto è presente, non il suo verso.`;
+  }
+  if (id === "fc1") {
+    const v = dec.slice(0, 64);
+    const ord = [...v.keys()].sort((a, b) => Math.abs(v[b]) - Math.abs(v[a]));
+    const forti = v.filter((x) => Math.abs(x) > Math.abs(v[ord[0]]) / 2).length;
+    return `Dei 64 neuroni, solo <b>${forti}</b> superano metà della risposta massima: la tua cifra è descritta da pochi "motivi" dominanti (i più forti sono ${ord.slice(0, 4).map((i) => `n. ${i}`).join(", ")}).`;
+  }
+  if (id === "fc2") {
+    const v = dec.slice(0, 10);
+    const ord = [...v.keys()].sort((a, b) => v[b] - v[a]);
+    return `Il punteggio più alto è quello del <b>${ord[0]}</b> (${num(v[ord[0]], 2)}), seguito dal ${ord[1]} (${num(v[ord[1]], 2)}) e dal ${ord[2]} (${num(v[ord[2]], 2)}). Sono punteggi grezzi: diventano probabilità solo con la softmax, sul client (ultima pagina).`;
+  }
+  return "";
+}
+
+function introStrato(fase, dec, d) {
+  const info = STRATI[fase.id];
+  return [
+    percorso(fase.id),
+    scheda(
+      "neutro",
+      "A cosa serve questo passo",
+      p(info.scopo),
+      h("div", { class: "scopo" },
+        h("div", {}, h("span", {}, "riceve"), h("b", {}, info.riceve)),
+        h("div", {}, h("span", {}, "produce"), h("b", {}, info.produce)),
+        h("div", {}, h("span", {}, "senza questo passo"), h("b", {}, info.senza))
+      ),
+      h("div", { class: "osserva" }, h("span", {}, "Nella tua cifra"), p(osserva(fase.id, dec, d)))
+    ),
+  ];
+}
 
 // ───────────────────────── navigazione ─────────────────────────
 
@@ -826,13 +1030,41 @@ const corpo = ov.querySelector(".corpo-i");
 function costruisciNav() {
   nav.replaceChildren(h("div", { class: "marchio" }, h("i"), "Ispettore", h("span", {}, `${FASI_ISP.length} fasi`)));
   let gruppo = null;
+  let sotto = null;
+  let contenitore = nav;
   FASI_ISP.forEach((f, i) => {
     if (f.gruppo !== gruppo) {
       gruppo = f.gruppo;
-      nav.append(h("div", { class: `gruppo ${gruppo}` }, GRUPPI[gruppo]));
+      sotto = null;
+      contenitore = nav;
+      nav.append(h("div", { class: `gruppo ${gruppo}` }, nomeGruppo(gruppo)));
     }
-    nav.append(h("button", { class: "voce", "data-i": i, onclick: () => mostra(i) }, f.titolo));
+    if ((f.sotto || null) !== sotto) {
+      sotto = f.sotto || null;
+      contenitore = nav;
+      if (sotto) {
+        const n = FASI_ISP.filter((x) => x.sotto === sotto).length;
+        const voci = h("div", { class: "voci-sotto" });
+        const blocco = h("div", { class: "sottogruppo" + (ISP.chiusi.has(sotto) ? " chiuso" : ""), "data-sotto": sotto },
+          h("button", { class: "testa-sotto", "aria-expanded": String(!ISP.chiusi.has(sotto)), onclick: () => apriSottogruppo(blocco, null) },
+            h("i", { class: "triangolo" }, "▾"), SOTTOGRUPPI[sotto], h("span", {}, String(n))),
+          voci);
+        nav.append(blocco);
+        contenitore = voci;
+      }
+    }
+    contenitore.append(h("button", { class: "voce", "data-i": i, onclick: () => mostra(i) }, titolo(f)));
   });
+}
+
+// apri = true/false forza lo stato, null lo inverte
+function apriSottogruppo(blocco, apri) {
+  const nome = blocco.dataset.sotto;
+  const aperto = apri ?? blocco.classList.contains("chiuso");
+  blocco.classList.toggle("chiuso", !aperto);
+  blocco.querySelector(".testa-sotto").setAttribute("aria-expanded", String(aperto));
+  if (aperto) ISP.chiusi.delete(nome); else ISP.chiusi.add(nome);
+  try { localStorage.setItem("ispettore-chiusi", JSON.stringify([...ISP.chiusi])); } catch {}
 }
 
 async function mostra(i) {
@@ -840,7 +1072,10 @@ async function mostra(i) {
   ISP.indice = (i + FASI_ISP.length) % FASI_ISP.length;
   const f = FASI_ISP[ISP.indice];
   nav.querySelectorAll(".voce").forEach((b) => b.classList.toggle("attiva", +b.dataset.i === ISP.indice));
-  ov.querySelector(".titolo-i").textContent = f.passo ? `Server · ${f.titolo}` : f.titolo;
+  // la pagina aperta resta sempre visibile: se è in un sottogruppo chiuso, lo apre
+  const blocco = nav.querySelector(".voce.attiva")?.closest(".sottogruppo.chiuso");
+  if (blocco) apriSottogruppo(blocco, true);
+  ov.querySelector(".titolo-i").textContent = f.passo ? `Server · ${f.titolo}` : titolo(f);
   ov.querySelector(".pos-i").textContent = `${ISP.indice + 1} / ${FASI_ISP.length}`;
   const d = window.ultimo;
   if (!d) {
@@ -856,14 +1091,17 @@ async function mostra(i) {
   const testata = h(
     "div",
     { class: "testata-i" },
-    h("div", { class: "occhiello" }, GRUPPI[f.gruppo]),
-    h("h1", {}, f.passo ? `Strato ${f.titolo}` : f.titolo)
+    h("div", { class: "occhiello" }, nomeGruppo(f.gruppo)),
+    h("h1", {}, f.passo ? `Strato ${f.titolo}` : titolo(f))
   );
   corpo.replaceChildren(testata, ...contenuto);
   corpo.scrollTop = 0;
 }
 
 window.apriIspettore = (id = "prep") => {
+  FASI_ISP = window.ultimo?.modalita === "chiaro"
+    ? TUTTE_LE_FASI.filter((f) => FASI_IN_CHIARO.includes(f.id))
+    : TUTTE_LE_FASI;
   costruisciNav();
   ov.hidden = false;
   document.body.classList.add("ispeziona");

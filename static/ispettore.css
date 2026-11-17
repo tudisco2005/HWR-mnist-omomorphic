@@ -43,6 +43,24 @@ nav .voce {
 nav .voce:hover { background: var(--carta); color: var(--testo); }
 nav .voce.attiva { background: var(--carta-2); color: var(--testo); font-weight: 600; }
 
+/* sottogruppi richiudibili (Preprocessing, Convoluzione) */
+.sottogruppo { display: flex; flex-direction: column; gap: 1px; }
+.testa-sotto {
+  display: flex; align-items: center; gap: 0.45rem; text-align: left;
+  border: 0; background: none; color: var(--testo); font: inherit; font-size: 0.85rem; font-weight: 600;
+  padding: 0.42rem 0.6rem; border-radius: 6px; cursor: pointer;
+}
+.testa-sotto:hover { background: var(--carta); }
+.testa-sotto:focus-visible { outline: 2px solid var(--accento); outline-offset: -2px; }
+.testa-sotto .triangolo { font-style: normal; font-size: 0.95rem; line-height: 1; color: var(--tenue); width: 0.8rem; transition: transform .15s; }
+.testa-sotto span {
+  margin-left: auto; font-size: 0.68rem; font-weight: 500; color: var(--tenue);
+  background: var(--carta-2); padding: 0 0.4rem; border-radius: 999px;
+}
+.sottogruppo.chiuso .triangolo { transform: rotate(-90deg); }
+.voci-sotto { display: flex; flex-direction: column; gap: 1px; margin-left: 0.95rem; padding-left: 0.4rem; border-left: 1px solid var(--linea); }
+.sottogruppo.chiuso .voci-sotto { display: none; }
+
 /* barra in alto, sopra il contenuto */
 .barra-i {
   display: flex; align-items: center; gap: 0.4rem;
@@ -180,6 +198,8 @@ svg.dispersione .asse { font-size: 10px; fill: var(--tenue); text-anchor: middle
   #ispettore nav, .barra-i, .corpo-i { grid-column: 1; }
   #ispettore nav { grid-row: auto; flex-direction: row; flex-wrap: wrap; padding: 0.5rem 1rem; border-right: 0; border-bottom: 1px solid var(--linea); }
   nav .gruppo, .marchio { display: none; }
+  .sottogruppo, .voci-sotto, .sottogruppo.chiuso .voci-sotto { display: contents; }
+  .testa-sotto { display: none; }
   .corpo-i { padding: 1.2rem 1rem 3rem; }
 }
 
@@ -272,3 +292,44 @@ pre.hexdump .asc { color: var(--accento); white-space: pre; }
 .contenuto-pacchetto { display: flex; flex-direction: column; gap: 0.8rem; }
 @keyframes appari { from { opacity: 0; } }
 @keyframes sali { from { transform: translateY(12px); opacity: 0; } }
+
+/* ── strati: dove siamo nella rete ── */
+.percorso { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 1rem; }
+.percorso .tappa {
+  display: flex; flex-direction: column; align-items: center; min-width: 5.2rem;
+  padding: 0.4rem 0.7rem; border-radius: 8px; border: 1px solid var(--linea);
+  color: var(--tenue); font-size: 0.78rem; position: relative;
+}
+.percorso .tappa:not(:last-child)::after {
+  content: "→"; position: absolute; right: -0.33rem; top: 50%; transform: translate(50%, -50%);
+  color: var(--barra); font-size: 0.8rem;
+}
+.percorso .tappa b { font-weight: 600; font-family: var(--mono); }
+.percorso .tappa span { font-size: 0.68rem; }
+.percorso .tappa[title] { cursor: pointer; }
+.percorso .tappa[title]:hover { border-color: var(--tenue); }
+.percorso .tappa.fatta { color: var(--testo); background: var(--carta); }
+.percorso .tappa.qui { color: var(--testo); background: var(--accento-tinta); border-color: var(--accento); }
+.percorso .tappa.qui b { color: var(--accento); }
+
+/* ── strati: a cosa serve ── */
+.scopo { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: 0.8rem; margin: 0.2rem 0; }
+.scopo div { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.55rem 0.75rem; background: var(--carta-2); border-radius: 8px; }
+.scopo span, .osserva > span { font-size: 0.68rem; color: var(--tenue); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+.scopo b { font-size: 0.85rem; font-weight: 500; line-height: 1.4; }
+.osserva { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.6rem 0.8rem; border-left: 3px solid var(--didattica); background: color-mix(in srgb, var(--didattica) 8%, transparent); border-radius: 0 8px 8px 0; }
+.osserva .spiega { color: #c9cdd3; }
+
+/* ── decifratura: il processo passo per passo ── */
+.processo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.processo > li { display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.9rem; position: relative; padding-bottom: 1.4rem; }
+.processo > li:not(:last-child)::before {
+  content: ""; position: absolute; left: 1.1rem; top: 2.2rem; bottom: 0.2rem; width: 1px; background: var(--linea);
+}
+.processo .num-p {
+  display: grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: 50%;
+  background: var(--client-tinta); color: var(--client); font-weight: 700; font-size: 0.9rem;
+}
+.processo .corpo-p { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; padding-top: 0.3rem; max-width: 46rem; }
+.processo h4 { margin: 0; font-size: 1rem; font-weight: 600; }
+.processo table.dati { max-width: 40rem; }

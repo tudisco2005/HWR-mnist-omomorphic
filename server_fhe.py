@@ -5,6 +5,8 @@ Ascolta su http://127.0.0.1:5001 e riceve solo bytes:
 
   POST /contesto    corpo = contesto pubblico serializzato (senza chiave segreta)
   POST /inferenza   corpo = immagine cifrata; intestazioni X-Client-Id, X-Finestre
+  POST /inferenza_chiaro  corpo = immagine normalizzata IN CHIARO (784 float32):
+                    modalità di confronto, il server vede davvero l'immagine
   GET  /modello     pesi in chiaro (servono al client solo per la vista didattica)
   GET  /info        PID e stato del processo
 
@@ -19,6 +21,8 @@ import os
 import time
 from pathlib import Path
 
+import numpy as np
+import torch
 from flask import Flask, Response, jsonify, request
 
 from fhe import Server
@@ -76,6 +80,37 @@ def inferenza():
         yield json.dumps(dict(evento="fine", ms_totale=round((time.perf_counter() - t0) * 1000, 1))) + "\n"
 
     return _con_impronta(Response(eventi(), mimetype="application/x-ndjson"))
+
+
+@app.post("/inferenza_chiaro")
+@torch.no_grad()
+def inferenza_chiaro():
+    """Modalità senza cifratura, per confronto: il corpo è l'immagine stessa
+    (784 float32 little endian). Stessi strati, eseguiti con PyTorch; per
+    ogni strato si restituiscono tempo e valori di uscita (vista didattica)."""
+    t0 = time.perf_counter()
+    img = np.frombuffer(request.get_data(), dtype="<f4").reshape(1, 1, 28, 28)
+    m = server.modello
+    x = torch.tensor(img.copy())
+    strati, t = [], time.perf_counter()
+
+    def fine(nome):
+        nonlocal t
+        ms = round((time.perf_counter() - t) * 1000, 3)
+        # uscita dello strato: il server la conosce, nessuna cifratura la nasconde
+        strati.append(dict(nome=nome, millisecondi=ms, valori=[round(float(v), 6) for v in x.flatten()]))
+        t = time.perf_counter()
+
+    x = m.conv1(x).view(1, -1); fine("conv")
+    x = x * x;                  fine("x²")
+    x = m.fc1(x);               fine("fc1")
+    x = x * x;                  fine("x²")
+    x = m.fc2(x)[0];            fine("fc2")
+    return _con_impronta(jsonify(
+        punteggi=[float(v) for v in x],
+        strati=strati,
+        ms_totale=round((time.perf_counter() - t0) * 1000, 3),
+    ))
 
 
 @app.get("/modello")

@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from dati_mnist import carica, normalizza
 from fhe import Client, Server
@@ -27,7 +28,8 @@ def main():
     giuste_cifrate = giuste_chiaro = concordi = 0
     errore_max = 0.0
     inizio = time.perf_counter()
-    for i, (img, y) in enumerate(zip(immagini, etichette), 1):
+    barra = tqdm(zip(immagini, etichette), total=N, desc="Inferenza cifrata", unit="img")
+    for i, (img, y) in enumerate(barra, 1):
         ct, n_finestre = client.cifra(img)
         punteggi = client.decifra(server.inferenza(id_client, ct, n_finestre).risultato)
         chiaro = server.inferenza_in_chiaro(img)
@@ -36,8 +38,7 @@ def main():
         giuste_chiaro += int(chiaro.argmax() == y)
         concordi += int(punteggi.argmax() == chiaro.argmax())
         errore_max = max(errore_max, float(np.abs(punteggi - chiaro).max()))
-        if i % 10 == 0:
-            print(f"{i}/{N}  accuratezza cifrata {giuste_cifrate / i:.1%}")
+        barra.set_postfix(acc_cifrata=f"{giuste_cifrate / i:.1%}", concordi=f"{concordi / i:.1%}")
 
     durata = time.perf_counter() - inizio
     print(f"\nImmagini:                 {N}")

@@ -1,4 +1,6 @@
 """Demo web, lato CLIENT: disegna una cifra, guardala riconoscere sui dati cifrati.
+Un selettore nella pagina permette di eseguire la stessa inferenza in chiaro,
+per confronto (tempi, e cosa vede il server).
 
 Avvio:  python app.py   →   http://127.0.0.1:5000
 
@@ -329,6 +331,8 @@ def riconosci():
         nota="Pacchetto di controllo: contiene davvero il disegno, quindi il rilevatore deve trovarlo.",
     )
     data_url = request.json["immagine"]
+    if request.json.get("modalita") == "chiaro":
+        return Response(stream_with_context(flusso_in_chiaro(data_url)), mimetype="application/x-ndjson")
 
     def flusso():
         try:
@@ -441,6 +445,87 @@ def riconosci():
             yield _evento("errore", messaggio=str(errore))
 
     return Response(stream_with_context(flusso()), mimetype="application/x-ndjson")
+
+
+def flusso_in_chiaro(data_url: str):
+    """Modalità di confronto SENZA cifratura: l'immagine normalizzata viaggia così
+    com'è e il server la elabora in chiaro. Gli eventi sono gli stessi della
+    modalità cifrata, così l'interfaccia mostra le stesse fasi; il rilevatore
+    di rete, questa volta, trova l'immagine nei pacchetti."""
+    try:
+        yield _evento("cifra")
+        img_uint8, fasi = prepara_come_mnist(data_url)
+        if img_uint8 is None:
+            yield _evento("errore", messaggio="Il disegno è vuoto")
+            return
+        img = normalizza(img_uint8)
+        corpo = img.astype("<f4").tobytes()
+        pixel = img_uint8.flatten().tolist()
+        yield _evento("cifrato", pixel=pixel, byte=len(corpo), rumore=pixel)
+
+        yield _evento("invia", byte=len(corpo))
+        yield _evento("calcola")
+        t0 = time.perf_counter()
+        r = chiama(
+            "POST", "/inferenza_chiaro", corpo, {"Content-Type": "application/octet-stream"},
+            descr_richiesta="Immagine normalizzata IN CHIARO (784 float32): nessuna cifratura, il server la vede.",
+            descr_risposta="Punteggi in chiaro e tempi dei singoli strati",
+        )
+        t_rete = ms(t0)
+        risposta = r.json()
+        for i, strato in enumerate(risposta["strati"]):
+            yield _evento("strato", indice=i, nome=strato["nome"], millisecondi=strato["millisecondi"])
+
+        punteggi = np.array(risposta["punteggi"])
+        scala = (punteggi - punteggi.min()) / (np.ptp(punteggi) or 1) * 255
+        colonne = [int(v) for v in scala] * 6  # canvas 10x6: una colonna di grigio per cifra
+        yield _evento("restituisce", byte=len(r.content), rumore=colonne)
+        yield _evento("decifra")
+        registro.analizza_giro(img_uint8, img)
+
+        # vista didattica: uscita di ogni strato sul server, confrontata con il riferimento locale
+        rif = strati_in_chiaro(img)
+        passi = [dict(nome="ingresso", millisecondi=0)]
+        for strato, chiave in zip(risposta["strati"], ["conv", "x²#1", "fc1", "x²#2", "fc2"]):
+            valori, atteso = np.array(strato["valori"]), rif[chiave]
+            passi.append(dict(
+                nome=strato["nome"],
+                millisecondi=strato["millisecondi"],
+                n_valori=len(valori),
+                decifrato=arrotonda(valori, 5),  # stesso campo della modalità cifrata: qui è già in chiaro
+                chiaro=arrotonda(atteso, 5),
+                scarto=float(np.abs(valori - atteso).max()),
+            ))
+        chiaro = rif["fc2"]
+        probabilita = np.exp(punteggi - punteggi.max())
+        probabilita /= probabilita.sum()
+        yield _evento("risultato", dati=dict(
+            modalita="chiaro",
+            pixel=pixel,
+            sessione=SESSIONE,
+            preprocessing=fasi,
+            normalizzata=arrotonda(img.flatten(), 4),
+            client=dict(
+                punteggi=punteggi.round(4).tolist(),
+                punteggi_grezzi=[float(v) for v in punteggi],
+                probabilita=[float(v) for v in probabilita],
+                predizione=int(punteggi.argmax()),
+            ),
+            canale=dict(
+                byte_immagine=len(corpo),
+                byte_risposta=len(r.content),
+                ms_rete=t_rete,
+                giro=registro.giro,
+            ),
+            server=dict(ms_totale=risposta["ms_totale"], passi=passi),
+            verifica=dict(
+                punteggi_chiaro=arrotonda(chiaro, 6),
+                predizione_chiaro=int(chiaro.argmax()),
+                errore_max=float(np.abs(punteggi - chiaro).max()),
+            ),
+        ))
+    except Exception as errore:
+        yield _evento("errore", messaggio=str(errore))
 
 
 # ───────────── registro di rete ─────────────
