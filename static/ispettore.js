@@ -17,7 +17,7 @@ const TUTTE_LE_FASI = [
   { id: "dec", gruppo: "ritorno", titolo: "Decifratura" },
 ];
 // In chiaro non ci sono chiavi, cifratura né livelli: restano le altre pagine.
-const FASI_IN_CHIARO = ["prep", "norm", "rete", "conv", "q1", "fc1", "q2", "fc2", "dec"];
+const FASI_IN_CHIARO = ["prep", "norm", "im2col", "rete", "conv", "q1", "fc1", "q2", "fc2", "dec"];
 const inChiaro = () => window.ultimo?.modalita === "chiaro";
 let FASI_ISP = TUTTE_LE_FASI;
 // Sottogruppi richiudibili della barra laterale
@@ -186,7 +186,7 @@ function metro(livello, totale = 7) {
   );
 }
 
-const ETICHETTE_SCHEDA = { client: "Client", server: "Server", didattica: "Vista didattica", rete: "Rete", neutro: "" };
+const ETICHETTE_SCHEDA = { client: "Client", server: "Server", didattica: "Vista didattica", rete: "Rete", neutro: "", dati: "Dati", modello: "Modello" };
 function scheda(tipo, titolo, ...contenuto) {
   return h(
     "section",
@@ -204,6 +204,18 @@ const tabella = (righe, intestazione) =>
     h("tbody", {}, righe.map((r) => h("tr", {}, r.map((c) => h("td", {}, c)))))
   );
 const griglia = (...figli) => h("div", { class: "griglia-i" }, ...figli);
+// Schede di verifica (contenuto decifrato, confronto con PyTorch): una sotto l'altra, dopo un
+// separatore; visibili solo con la casella "Mostra viste didattiche" della barra in alto.
+const rigaDidattica = (...figli) =>
+  h("div", { class: "riga-didattica" },
+    h("p", { class: "avviso-didattica" }, "Viste didattiche nascoste (valori decifrati e confronto con PyTorch): attiva \"Mostra viste didattiche\" in alto."),
+    h("div", { class: "riga-didattica-schede" },
+      inChiaro()
+        ? h("div", { class: "separatore-chiave" }, h("span", {}, "🔍 Da qui in poi: verifiche fatte dal client, solo per la demo"))
+        : h("div", { class: "separatore-chiave" },
+            h("span", {}, "🔑 Da qui in poi: informazioni disponibili solo con la chiave segreta del client"),
+            h("small", {}, "Il server non può vedere nulla di quanto segue: il client decifra i valori intermedi solo per questa demo.")),
+      ...figli));
 const fila = (...figli) => h("div", { class: "fila" }, ...figli);
 const figura = (el, titolo, nota) => h("figure", { class: "fig" }, el, h("figcaption", {}, h("b", {}, titolo), nota ? h("span", {}, nota) : null));
 const freccia = () => h("div", { class: "freccia-i" }, "→");
@@ -351,6 +363,228 @@ function chiudiModale() {
 
 // ───────────────────────── pagine ─────────────────────────
 
+// ───────────────────────── im2col: frecce dei pixel ─────────────────────────
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+function svg(tag, attr = {}) {
+  const e = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attr)) e.setAttribute(k, v);
+  return e;
+}
+
+// Disegna su un SVG sovrapposto le frecce pixel dell'immagine → cella della
+// finestra 7×7 → slot. Animazione: un pixel alla volta, quelli già visti restano tenui.
+function frecceIm2col({ contenitore, img, patch, mat, cellaImg, cellaSlot, testo, k, valore }) {
+  const strato = svg("svg", { class: "frecce" });
+  const defs = svg("defs");
+  ["forte", "tenue"].forEach((tipo) => {
+    const m = svg("marker", { id: `punta-${tipo}`, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+    m.append(svg("path", { d: "M0,0 L10,5 L0,10 z", class: `punta ${tipo}` }));
+    defs.append(m);
+  });
+  strato.append(defs);
+  const gruppo = svg("g");
+  strato.append(gruppo);
+  contenitore.append(strato);
+
+  let attivo = false;
+  let visti = 0;      // quanti pixel l'animazione ha già mostrato
+  let corrente = -1;  // pixel evidenziato (0..48)
+  let timer = null;
+
+  // centro di una cella, in coordinate del contenitore
+  const centro = (el, riga, col, righe, colonne) => {
+    const c = contenitore.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    return [b.left - c.left + ((col + 0.5) * b.width) / colonne, b.top - c.top + ((riga + 0.5) * b.height) / righe];
+  };
+  const quadrato = (el, riga, col, righe, colonne, classe) => {
+    const c = contenitore.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    const w = b.width / colonne, hh = b.height / righe;
+    return svg("rect", { x: b.left - c.left + col * w, y: b.top - c.top + riga * hh, width: w, height: hh, class: classe });
+  };
+  const curva = (a, b, classe, piega = 0.18) => {
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    // punto di controllo spostato di lato: la freccia si incurva verso l'alto
+    const cx = mx + dy * piega, cy = my - Math.abs(dx) * piega;
+    return svg("path", { d: `M${a[0]},${a[1]} Q${cx},${cy} ${b[0]},${b[1]}`, class: classe, "marker-end": `url(#punta-${classe.includes("forte") ? "forte" : "tenue"})` });
+  };
+
+  function punti(i) {
+    const kk = k(), r = Math.floor(kk / 8), c = kk % 8;
+    const rr = Math.floor(i / 7), cc = i % 7;
+    const pImg = patch.firstChild;
+    return {
+      rr, cc, kk,
+      pixel: [3 * r + rr, 3 * c + cc],
+      daImg: centro(img, 3 * r + rr, 3 * c + cc, 28, 28),
+      suPatch: centro(pImg, rr, cc, 7, 7),
+      inSlot: centro(mat, i, kk, 64, 64),
+      quadri: [
+        quadrato(img, 3 * r + rr, 3 * c + cc, 28, 28, "cella-pixel"),
+        quadrato(pImg, rr, cc, 7, 7, "cella-pixel"),
+        quadrato(mat, i, kk, 64, 64, "cella-pixel"),
+      ],
+    };
+  }
+
+  function ridisegna() {
+    gruppo.replaceChildren();
+    if (!attivo || !patch.firstChild) return;
+    for (let i = 0; i < visti; i++) {
+      if (i === corrente) continue;
+      const P = punti(i);
+      gruppo.append(curva(P.suPatch, P.inSlot, "freccia-px tenue", 0));
+    }
+    if (corrente >= 0) {
+      const P = punti(corrente);
+      gruppo.append(curva(P.daImg, P.suPatch, "freccia-px forte"), curva(P.suPatch, P.inSlot, "freccia-px forte", 0.12), ...P.quadri);
+      const s = corrente * 64 + P.kk;
+      testo.innerHTML = `Pixel <b>(${P.pixel[0]}, ${P.pixel[1]})</b> dell'immagine → posizione <b>(${P.rr}, ${P.cc})</b> nella finestra → <b>slot ${s}</b> (riga ${corrente} = ${P.rr}·7 + ${P.cc}, colonna ${P.kk} = numero della finestra). Valore: ${num(valore(s))}.`;
+    }
+  }
+
+  function ferma() { clearInterval(timer); timer = null; }
+  function avvia(pulsante) {
+    ferma();
+    visti = 0;
+    corrente = -1;
+    timer = setInterval(() => {
+      if (!strato.isConnected) return ferma(); // pagina cambiata
+      corrente = visti;
+      visti++;
+      ridisegna();
+      if (visti >= 49) {
+        ferma();
+        pulsante.textContent = "✕ Nascondi le frecce";
+      }
+    }, 180);
+  }
+
+  return {
+    ridisegna,
+    attivo: () => attivo,
+    mostraPixel(i) {
+      if (timer) { ferma(); visti = 49; }
+      corrente = i;
+      ridisegna();
+    },
+    alterna(pulsante) {
+      if (attivo && !timer && visti >= 49) { // fine: nasconde
+        attivo = false;
+        visti = 0;
+        corrente = -1;
+        ridisegna();
+        testo.innerHTML = "";
+        pulsante.textContent = "▶ Mostra dove finiscono i pixel";
+        return;
+      }
+      if (timer) { // durante l'animazione: salta alla fine
+        ferma();
+        visti = 49;
+        ridisegna();
+        pulsante.textContent = "✕ Nascondi le frecce";
+        return;
+      }
+      attivo = true;
+      pulsante.textContent = "⏭ Salta alla fine";
+      avvia(pulsante);
+    },
+  };
+}
+
+// im2col calcolato sul client: slot[riga · 64 + finestra] = pixel "riga" (0–48) della finestra,
+// righe 49–63 a zero. Stessa disposizione che il client cifra in modalità cifrata.
+function im2colLocale(n) {
+  const slot = new Array(4096).fill(0);
+  for (let k = 0; k < 64; k++) {
+    const r = Math.floor(k / 8), c = k % 8;
+    for (let i = 0; i < 49; i++) slot[i * 64 + k] = n[(3 * r + Math.floor(i / 7)) * 28 + 3 * c + (i % 7)];
+  }
+  return slot;
+}
+
+// ───────────────────────── strati: l'equazione dati × modello ─────────────────────────
+
+// Anteprima piccola di un vettore di dati: immagine, 4 mappe 8×8 oppure barre.
+function miniDati(valori) {
+  if (valori.length === 784) return mappa(valori, 28, 28, { scala: "grigio", cella: 3.6 });
+  if (valori.length >= 256 && valori.length <= 320) {
+    const v = valori.slice(0, 256);
+    const lo = minimo(v), hi = massimo(v);
+    return h("div", { class: "eq-mappe" }, [0, 1, 2, 3].map((c) => mappa(v.slice(c * 64, c * 64 + 64), 8, 8, { cella: 6, min: lo, max: hi, etichetta: (r, cc, x) => `canale ${c}, (${r}, ${cc}) = ${num(x)}` })));
+  }
+  const best = valori.length === 10 ? valori.indexOf(massimo(valori)) : -1;
+  return h("div", { class: "eq-barre" }, vettore(valori, { altezza: 64, evidenzia: best, etichette: valori.length === 10 ? [..."0123456789"] : undefined, testo: (i, x) => `${i}: ${num(x)}` }));
+}
+
+function miniPesi(id) {
+  const M = ISP.modello;
+  if (id === "conv") return h("div", { class: "eq-mappe" }, M.conv_w.map((k, i) => mappa(k, 7, 7, { cella: 7, etichetta: (r, c, v) => `kernel ${i}, w[${r}, ${c}] = ${num(v)}` })));
+  if (id === "fc1") return mappa(M.fc1_w.flat(), 64, 256, { cella: 0.75, etichetta: (r, c, v) => `W₁[${r}, ${c}] = ${num(v)}` });
+  if (id === "fc2") return mappa(M.fc2_w.flat(), 10, 64, { cella: 3, etichetta: (r, c, v) => `W₂[${r}, ${c}] = ${num(v)}` });
+  return h("div", { class: "eq-quadrato" }, "x · x");
+}
+
+const rumoreMini = (r) => mappa(r, 64, 64, { scala: "grigio", min: 0, max: 255, cella: 1.6, etichetta: (_, __, v) => `byte 0x${v.toString(16).padStart(2, "0")}` });
+
+// Un termine dell'equazione: ruolo (dati / modello), anteprima, chi può leggerlo.
+function termine(tipo, ruolo, nome, nota, vista, leggibile, extra = null) {
+  return h("div", { class: `eq-termine ${tipo}` },
+    h("div", { class: "eq-ruolo" }, ruolo),
+    h("div", { class: "eq-vis" }, vista),
+    h("b", { class: "eq-nome" }, nome),
+    h("span", { class: "eq-nota" }, nota),
+    extra,
+    h("div", { class: "eq-lettura " + (tipo === "operazione" ? "neutra" : leggibile ? "si" : "no") },
+      tipo === "operazione" ? "nota a tutti: nessun segreto" : leggibile ? "👁 il server lo legge" : "🔒 il server vede solo rumore")
+  );
+}
+
+// ingresso ⊗ pesi = uscita, con ciò che il server vede di ogni termine
+function equazione(d, fase) {
+  const ch = inChiaro();
+  const passi = d.server.passi;
+  const passo = passi[fase.passo];
+  const prec = passi[fase.passo - 1];
+  const inValori = fase.passo === 1 ? d.normalizzata : prec.decifrato;
+  const outValori = passo.decifrato;
+  const nomiIn = { conv: "l'immagine 28×28", q1: "l'uscita di conv", fc1: "l'uscita di x²", q2: "l'uscita di fc1", fc2: "l'uscita di x²" };
+  const nomiOut = { conv: "4 mappe 8×8", q1: "256 valori ≥ 0", fc1: "64 motivi", q2: "64 valori ≥ 0", fc2: "10 punteggi" };
+  const reale = (valori) => h("div", { class: "eq-reale" }, h("span", {}, "contenuto vero (solo con la chiave)"), miniDati(valori));
+
+  const dato = (nome, nota, valori, rumore) => ch
+    ? termine("dati", "Dati", nome, nota, miniDati(valori), true)
+    : termine("dati", "Dati", nome, nota, rumoreMini(rumore), false, reale(valori));
+
+  const ingresso = dato(`Ingresso: ${nomiIn[fase.id]}`, "cambia a ogni cifra", inValori, prec.rumore);
+  const uscita = dato(`Uscita: ${nomiOut[fase.id]}`, "cambia a ogni cifra", outValori, passo.rumore);
+  const quadrato = fase.id === "q1" || fase.id === "q2";
+  const pesi = quadrato
+    ? termine("operazione", "Operazione", "Quadrato, valore per valore", "nessun peso da imparare", miniPesi(fase.id), true)
+    : termine("modello", "Modello", fase.id === "conv" ? "4 kernel 7×7 + bias" : fase.id === "fc1" ? "W₁ (64×256) + b₁" : "W₂ (10×64) + b₂", "fisso: uguale per ogni cifra", miniPesi(fase.id), true);
+  const segno = { conv: "∗", fc1: "×", fc2: "×" }[fase.id];
+
+  const riga = quadrato
+    ? [ingresso, h("div", { class: "eq-op" }, "→"), pesi, h("div", { class: "eq-op" }, "="), uscita]
+    : [ingresso, h("div", { class: "eq-op", title: fase.id === "conv" ? "convoluzione" : "prodotto matrice-vettore" }, segno), pesi, h("div", { class: "eq-op" }, "="), uscita];
+
+  return h("section", { class: "equazione" },
+    h("header", {}, h("h4", {}, "Cosa entra, cosa usa, cosa esce"),
+      h("div", { class: "eq-legenda" }, h("i", { class: "l-dati" }), "dati della tua cifra", h("i", { class: "l-modello" }), "modello del server")),
+    h("div", { class: "eq-riga" }, riga),
+    p(ch
+      ? (quadrato
+        ? "<b>In chiaro</b> il server legge sia l'ingresso sia l'uscita: vede i valori della tua cifra prima e dopo il quadrato."
+        : "<b>In chiaro</b> il server legge tutti e tre i termini: i pesi sono suoi, ma vede anche ingresso e uscita, cioè la tua cifra.")
+      : (quadrato
+        ? "<b>Cifrato</b>: il server moltiplica il ciphertext per sé stesso senza sapere quali valori contiene. Ingresso e uscita restano cifrati: solo il client, con la chiave, vede il contenuto vero."
+        : "<b>Cifrato</b>: il server conosce i pesi (sono suoi), ma ingresso e uscita restano cifrati. Calcola il risultato senza poterlo leggere: solo il client, con la chiave, vede il contenuto vero."))
+  );
+}
+
 const PAGINE = {
   prep(d) {
     const P = d.preprocessing;
@@ -479,7 +713,9 @@ const PAGINE = {
   },
 
   im2col(d) {
-    const C = d.cifratura;
+    const ch = d.modalita === "chiaro";
+    // In chiaro il client non codifica nulla: la disposizione si ricalcola qui, solo per confronto.
+    const C = ch ? { slot: im2colLocale(d.normalizzata), n_finestre: 64 } : d.cifratura;
     const slot = C.slot;
     const n = d.normalizzata;
     const cellaImg = 10;
@@ -496,8 +732,10 @@ const PAGINE = {
     const boxMat = h("div", { class: "sovrapposto puntatore" }, mat, colonna, h("div", { class: "taglio", style: `top:${49 * cellaSlot}px` }));
     const patch = h("div", { class: "patch" });
     const info = h("p", { class: "spiega" });
+    let kAttuale = 27;
 
     function seleziona(k) {
+      kAttuale = k;
       const r = Math.floor(k / 8);
       const c = k % 8;
       Object.assign(finestra.style, { left: c * 3 * cellaImg + "px", top: r * 3 * cellaImg + "px", width: 7 * cellaImg + "px", height: 7 * cellaImg + "px" });
@@ -505,6 +743,7 @@ const PAGINE = {
       const valori = Array.from({ length: 49 }, (_, i) => slot[i * 64 + k]);
       patch.replaceChildren(mappa(valori, 7, 7, { scala: "grigio", min: minimo(n), max: massimo(n), cella: 18, etichetta: (rr, cc, v) => `pixel (${3 * r + rr}, ${3 * c + cc}) → slot ${(rr * 7 + cc) * 64 + k} = ${num(v)}` }));
       info.innerHTML = `<b>Finestra ${k}</b> (riga ${r}, colonna ${c}): pixel da (${3 * r}, ${3 * c}) a (${3 * r + 6}, ${3 * c + 6}). I suoi 49 pixel finiscono nella <b>colonna ${k}</b> degli slot, uno per riga.`;
+      if (frecce) frecce.ridisegna();
     }
     boxImg.addEventListener("mousemove", (e) => {
       const b = img.getBoundingClientRect();
@@ -518,20 +757,47 @@ const PAGINE = {
       const k = Math.floor((e.clientX - b.left) / cellaSlot);
       if (k >= 0 && k < 64) seleziona(k);
     });
+    // ── frecce: dove finisce ogni pixel della finestra ──
+    const contenitore = fila(
+      figura(boxImg, "Immagine normalizzata", "le 8×8 finestre si sovrappongono di 4 pixel"),
+      freccia(),
+      figura(patch, "La finestra scelta", "7×7 pixel"),
+      freccia(),
+      figura(boxMat, "Slot (64×64)", "riga = pixel della finestra, colonna = finestra; righe 49–63 a zero")
+    );
+    contenitore.classList.add("con-frecce");
+    const percorsoTxt = h("p", { class: "spiega percorso-pixel" });
+    const frecce = frecceIm2col({ contenitore, img, patch, mat, cellaImg, cellaSlot, testo: percorsoTxt, k: () => kAttuale, valore: (i) => slot[i] });
+    const pulsante = h("button", { class: "pulsante-frecce" }, "▶ Mostra dove finiscono i pixel");
+    pulsante.onclick = () => frecce.alterna(pulsante);
+    patch.addEventListener("mousemove", (e) => {
+      if (!frecce.attivo()) return;
+      const b = patch.firstChild.getBoundingClientRect();
+      const cc = Math.floor((e.clientX - b.left) / (b.width / 7));
+      const rr = Math.floor((e.clientY - b.top) / (b.height / 7));
+      if (rr >= 0 && rr < 7 && cc >= 0 && cc < 7) frecce.mostraPixel(rr * 7 + cc);
+    });
     seleziona(27);
 
+    const nonServe = ch ? scheda(
+      "neutro",
+      "Perché in chiaro non serve",
+      p("CKKS non conosce le immagini: cifra un unico <b>vettore</b> di numeri (gli slot) e sul ciphertext permette solo tre operazioni, applicate a tutto il vettore insieme: somma, moltiplicazione elemento per elemento e <b>rotazione</b> (spostare tutti gli slot di qualche posizione). Non può \"prendere la finestra 7×7 attorno al pixel (i, j)\": leggere un pixel in una posizione scelta richiederebbe di vedere i dati."),
+      p("Per questo, in modalità cifrata, il client riorganizza l'immagine <b>prima</b> di cifrarla: mette i 49 pixel di ogni finestra in una colonna. Così, per la convoluzione, al server basta moltiplicare ogni riga per il peso corrispondente del kernel e sommare le righe con delle rotazioni: tutte operazioni che CKKS sa fare."),
+      p("In chiaro il server riceve l'immagine 28×28 così com'è e PyTorch (<span class=\"mono\">conv1</span>) fa scorrere il kernel direttamente sulla griglia di pixel: può leggere qualunque pixel, quindi non serve nessuna disposizione speciale. La matrice qui sotto <b>non viene mai calcolata né trasmessa</b>: è ricostruita ora, sul client, solo per confrontarla con la modalità cifrata.")
+    ) : null;
+
     return [
-      p(`La convoluzione 7×7 con passo 3 guarda ${C.n_finestre} finestre dell'immagine. Il client le dispone negli slot in modo che il server possa fare la convoluzione con sole moltiplicazioni e rotazioni: ${C.n_finestre} finestre × 49 pixel = 3136 valori, in una matrice 64×64 (4096 slot su ${num(d.sessione.parametri.slot)}).`),
+      p(ch
+        ? `In modalità cifrata la convoluzione 7×7 con passo 3 richiede di disporre le ${C.n_finestre} finestre dell'immagine negli slot di CKKS. <b>In chiaro questo passaggio non avviene</b>: la pagina mostra comunque com'è fatto, per confronto.`
+        : `La convoluzione 7×7 con passo 3 guarda ${C.n_finestre} finestre dell'immagine. Il client le dispone negli slot in modo che il server possa fare la convoluzione con sole moltiplicazioni e rotazioni: ${C.n_finestre} finestre × 49 pixel = 3136 valori, in una matrice 64×64 (4096 slot su ${num(d.sessione.parametri.slot)}).`),
+      nonServe,
       scheda(
-        "client",
-        "Passa sopra l'immagine o sulla matrice",
-        fila(
-          figura(boxImg, "Immagine normalizzata", "le 8×8 finestre si sovrappongono di 4 pixel"),
-          freccia(),
-          figura(patch, "La finestra scelta", "7×7 pixel"),
-          freccia(),
-          figura(boxMat, "Slot (64×64)", "riga = pixel della finestra, colonna = finestra; righe 49–63 a zero")
-        ),
+        ch ? "didattica" : "client",
+        ch ? "Come sarebbe la codifica (non usata in chiaro)" : "Passa sopra l'immagine o sulla matrice",
+        h("div", { class: "comandi-frecce" }, pulsante, h("span", { class: "spiega" }, "Le frecce seguono uno per uno i 49 pixel della finestra scelta: dall'immagine alla finestra 7×7, poi al loro slot. Con le frecce attive, passa sopra la finestra 7×7 per scegliere un pixel.")),
+        contenitore,
+        percorsoTxt,
         info
       ),
     ];
@@ -661,15 +927,15 @@ const PAGINE = {
     let pesi;
     if (fase.id === "conv") {
       pesi = scheda(
-        "server",
-        "Pesi in chiaro: 4 kernel 7×7 + bias",
+        "modello",
+        "I pesi: 4 kernel 7×7 + bias (uguali per ogni cifra)",
         fila(M.conv_w.map((k, i) => figura(mappa(k, 7, 7, { cella: 14, etichetta: (r, c, v) => `canale ${i}, w[${r}, ${c}] = ${num(v)}` }), `canale ${i}`, `bias ${num(M.conv_b[i], 3)}`))),
         legendaDiv(M.conv_w.flat())
       );
     } else if (fase.id === "fc1") {
       pesi = scheda(
-        "server",
-        "Pesi in chiaro: W₁ (64 × 256) e b₁",
+        "modello",
+        "I pesi: W₁ (64 × 256) e b₁ (uguali per ogni cifra)",
         mappa(M.fc1_w.flat(), 64, 256, { cella: 2, etichetta: (r, c, v) => `W₁[${r}, ${c}] = ${num(v)}: neurone ${r} ← canale ${Math.floor(c / 64)}, finestra ${c % 64}` }),
         legendaDiv(M.fc1_w.flat()),
         h("div", { class: "etichetta-catena" }, "b₁ (64 valori)"),
@@ -678,8 +944,8 @@ const PAGINE = {
       );
     } else if (fase.id === "fc2") {
       pesi = scheda(
-        "server",
-        "Pesi in chiaro: W₂ (10 × 64) e b₂",
+        "modello",
+        "I pesi: W₂ (10 × 64) e b₂ (uguali per ogni cifra)",
         mappa(M.fc2_w.flat(), 10, 64, { cella: 7, etichetta: (r, c, v) => `W₂[${r}, ${c}] = ${num(v)}: cifra ${r} ← neurone ${c}` }),
         legendaDiv(M.fc2_w.flat()),
         h("div", { class: "etichetta-catena" }, "b₂ (uno per cifra)"),
@@ -687,8 +953,8 @@ const PAGINE = {
       );
     } else {
       pesi = scheda(
-        "server",
-        "Nessun peso",
+        "modello",
+        "Nessun peso: solo x · x",
         p(inChiaro()
           ? "Ogni valore viene moltiplicato per sé stesso: un'operazione elementare, senza alcun costo aggiuntivo."
           : "Il ciphertext viene moltiplicato per sé stesso. Il prodotto ha 3 polinomi: la chiave di rilinearizzazione lo riporta a 2, poi il rescale divide per un primo da 40 bit e riporta la scala a 2^40.")
@@ -728,17 +994,21 @@ const PAGINE = {
           h("div", {}, h("span", {}, "tempo"), h("b", {}, ms(passo.millisecondi))),
           h("div", {}, h("span", {}, "dati"), h("b", {}, "in chiaro"))
         ),
+        equazione(d, fase),
         griglia(
           scheda(
-            "server",
-            "Il server vede: i valori stessi",
+            "dati",
+            "L'uscita per la tua cifra: il server la legge",
             p("Senza cifratura, l'uscita dello strato è leggibile dal server così com'è. Sono i valori che ha restituito al client."),
             ...contenuto
           ),
-          pesi,
+          pesi
+        ),
+        rigaDidattica(
           scheda(
             "neutro",
             "Confronto con PyTorch sul client",
+            p("<b>A cosa serve:</b> verifica che il server abbia davvero eseguito il modello atteso. Ogni punto è un valore di questo strato: in orizzontale quello ricalcolato dal client con PyTorch, in verticale quello restituito dal server. Se i punti stanno sulla diagonale i due calcoli coincidono. In modalità cifrata lo stesso grafico mostra quanto la cifratura CKKS sposta i valori."),
             dispersione(chiaro, dec.slice(0, chiaro.length)),
             p(`Scarto massimo: <b>${num(passo.scarto, 6)}</b> su ${chiaro.length} valori. Stesso modello e stessi numeri: lo scarto è nullo, a parte l'arrotondamento a 6 cifre nella risposta del server. In modalità cifrata qui compare l'errore di CKKS.`)
           )
@@ -758,10 +1028,11 @@ const PAGINE = {
         h("div", {}, h("span", {}, "tempo"), h("b", {}, ms(passo.millisecondi))),
         h("div", {}, h("span", {}, "livelli consumati"), h("b", {}, String(livelloUsato)))
       ),
+      equazione(d, fase),
       griglia(
         scheda(
-          "server",
-          "Il server vede",
+          "dati",
+          "L'uscita per la tua cifra, come la vede il server: cifrata",
           mappa(passo.rumore, 64, 64, { scala: "grigio", min: 0, max: 255, cella: 3, etichetta: (r, c, v) => `byte 0x${v.toString(16).padStart(2, "0")}` }),
           tabella([
             ["Livello", h("span", {}, metro(passo.livello))],
@@ -772,16 +1043,19 @@ const PAGINE = {
           ]),
           fase.id === "conv" ? p("La convoluzione consuma due livelli: uno per il prodotto con il kernel, uno per creare il blocco costante (canale × 0 + 1). Poi tutti i vettori vengono allineati al livello più basso.") : null
         ),
-        pesi,
+        pesi
+      ),
+      rigaDidattica(
         scheda(
           "didattica",
-          "Contenuto, decifrato con la chiave del client",
+          "La stessa uscita, decifrata con la chiave del client",
           p("Il server non può vedere questi valori: li decifra il client solo per questa demo."),
           ...contenuto
         ),
         scheda(
           "neutro",
           "Confronto con PyTorch in chiaro",
+          p("<b>A cosa serve:</b> verifica che calcolare sui dati cifrati dia lo stesso risultato che calcolare in chiaro. Ogni punto è un valore di questo strato: in orizzontale quello calcolato da PyTorch senza cifratura (il riferimento), in verticale quello uscito dal calcolo cifrato e poi decifrato. Se i punti stanno sulla diagonale, la cifratura non ha alterato il risultato; un punto lontano dalla diagonale segnalerebbe un errore."),
           dispersione(chiaro, dec.slice(0, chiaro.length)),
           p(`Scarto massimo: <b>${num(passo.scarto, 6)}</b> su ${chiaro.length} valori. Ogni punto sulla diagonale è un valore identico; l'errore viene dall'arrotondamento CKKS alla scala 2^40.`)
         )
@@ -1114,6 +1388,13 @@ function chiudi() {
   document.body.classList.remove("ispeziona");
 }
 ov.querySelector(".chiudi").onclick = chiudi;
+// viste didattiche: nascoste all'apertura della pagina, la scelta vale per tutto l'ispettore
+const casellaDidattica = ov.querySelector("#mostra-didattica");
+casellaDidattica.checked = false;
+casellaDidattica.onchange = () => {
+  ov.classList.toggle("con-didattica", casellaDidattica.checked);
+  casellaDidattica.blur(); // così le frecce della tastiera continuano a cambiare pagina
+};
 ov.querySelector(".prec").onclick = () => mostra(ISP.indice - 1);
 ov.querySelector(".succ").onclick = () => mostra(ISP.indice + 1);
 document.addEventListener("keydown", (e) => {

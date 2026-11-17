@@ -333,3 +333,92 @@ pre.hexdump .asc { color: var(--accento); white-space: pre; }
 .processo .corpo-p { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; padding-top: 0.3rem; max-width: 46rem; }
 .processo h4 { margin: 0; font-size: 1rem; font-weight: 600; }
 .processo table.dati { max-width: 40rem; }
+
+/* ── im2col: frecce dei pixel ── */
+.comandi-frecce { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+.comandi-frecce .spiega { flex: 1; min-width: 16rem; }
+.pulsante-frecce { white-space: nowrap; }
+.fila.con-frecce { position: relative; }
+svg.frecce { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; z-index: 3; }
+.freccia-px { fill: none; }
+.freccia-px.forte { stroke: var(--accento); stroke-width: 2; }
+.freccia-px.tenue { stroke: var(--accento); stroke-width: 1; opacity: .28; }
+.punta.forte { fill: var(--accento); }
+.punta.tenue { fill: var(--accento); opacity: .5; }
+.cella-pixel { fill: none; stroke: #fff; stroke-width: 1.5; }
+.percorso-pixel:empty { display: none; }
+.percorso-pixel { color: #c9cdd3; font-family: var(--mono); font-size: 0.8rem; }
+
+/* ── strati: equazione dati × modello ── */
+.dati .badge { color: var(--client); background: var(--client-tinta); }
+.modello .badge { color: var(--server); background: var(--server-tinta); }
+.equazione {
+  background: var(--carta); border: 1px solid var(--linea); border-radius: 12px;
+  padding: 1rem 1.2rem; margin-bottom: 0.9rem; display: flex; flex-direction: column; gap: 0.8rem;
+}
+.equazione header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.6rem 1.2rem; padding: 0; }
+.equazione h4 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+.eq-legenda { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--tenue); }
+.eq-legenda i { width: 0.7rem; height: 0.7rem; border-radius: 3px; margin-left: 0.5rem; }
+.eq-legenda .l-dati { background: var(--client); }
+.eq-legenda .l-modello { background: var(--server); }
+.eq-riga { display: flex; align-items: stretch; flex-wrap: wrap; gap: 0.6rem; }
+.eq-termine {
+  flex: 1 1 11rem; display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-start;
+  padding: 0.7rem 0.8rem; border-radius: 10px; border: 1px solid var(--linea); border-top-width: 3px; background: var(--carta-2);
+}
+.eq-termine.dati { border-top-color: var(--client); }
+.eq-termine.modello { border-top-color: var(--server); }
+.eq-termine.operazione { border-top-color: var(--tenue); }
+.eq-ruolo { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.dati .eq-ruolo { color: var(--client); }
+.modello .eq-ruolo { color: var(--server); }
+.operazione .eq-ruolo { color: var(--tenue); }
+.eq-vis { min-height: 6.4rem; display: flex; align-items: center; }
+.eq-nome { font-size: 0.85rem; font-weight: 600; }
+.eq-nota { font-size: 0.74rem; color: var(--tenue); }
+.eq-mappe { display: grid; grid-template-columns: repeat(2, max-content); justify-content: start; gap: 4px; }
+.eq-barre { width: 100%; min-width: 9rem; }
+.eq-quadrato { font-family: var(--mono); font-size: 1.4rem; font-weight: 600; color: var(--testo); padding: 1rem 0.6rem; }
+.eq-op { align-self: center; font-size: 1.7rem; font-weight: 300; color: var(--tenue); padding: 0 0.1rem; }
+.eq-reale { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.4rem 0.5rem; border: 1px dashed color-mix(in srgb, var(--didattica) 45%, var(--linea)); border-radius: 7px; }
+.eq-reale > span { font-size: 0.66rem; color: var(--didattica); }
+.eq-lettura { margin-top: auto; font-size: 0.74rem; font-weight: 600; padding: 0.15rem 0.5rem; border-radius: 5px; }
+.eq-lettura.si { color: var(--server); background: var(--server-tinta); }
+.eq-lettura.no { color: var(--client); background: var(--client-tinta); }
+.eq-lettura.neutra { color: var(--tenue); background: var(--carta); }
+
+/* ── viste didattiche: riga orizzontale, nascosta di base ── */
+.riga-didattica { margin-top: 0.9rem; }
+.riga-didattica-schede { display: flex; flex-direction: column; gap: 0.9rem; }
+.separatore-chiave {
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem; text-align: center;
+  margin: 0.8rem 0 0.2rem; position: relative;
+}
+.separatore-chiave span {
+  position: relative; z-index: 1; padding: 0.3rem 0.9rem; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 600; color: var(--didattica);
+  background: var(--sfondo); border: 1px solid color-mix(in srgb, var(--didattica) 50%, var(--linea));
+}
+/* la linea tratteggiata passa dietro all'etichetta */
+.separatore-chiave::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0.95rem;
+  border-top: 2px dashed color-mix(in srgb, var(--didattica) 45%, transparent);
+}
+.separatore-chiave small { font-size: 0.74rem; color: var(--tenue); }
+.riga-didattica-schede .scheda-i { margin-bottom: 0; }
+#ispettore:not(.con-didattica) .riga-didattica-schede,
+#ispettore:not(.con-didattica) .eq-reale { display: none; }
+.avviso-didattica {
+  margin: 0; font-size: 0.8rem; color: var(--tenue);
+  padding: 0.6rem 0.9rem; border: 1px dashed var(--linea); border-radius: 10px;
+}
+#ispettore.con-didattica .avviso-didattica { display: none; }
+.casella-didattica {
+  display: inline-flex; align-items: center; gap: 0.45rem; margin-right: 0.6rem;
+  font-size: 0.82rem; color: var(--tenue); cursor: pointer; user-select: none;
+  padding: 0.35rem 0.7rem; border: 1px solid var(--linea); border-radius: 8px;
+}
+.casella-didattica:hover { color: var(--testo); }
+.casella-didattica input { accent-color: var(--didattica); width: 0.95rem; height: 0.95rem; margin: 0; cursor: pointer; }
+#ispettore.con-didattica .casella-didattica { color: var(--didattica); border-color: color-mix(in srgb, var(--didattica) 45%, var(--linea)); }
